@@ -1,0 +1,115 @@
+pipeline {
+    agent none
+    options { skipDefaultCheckout() }
+    stages {
+		stage ('Checkout') {
+			agent {
+				label 'Slave-1'
+		    }
+			steps {
+				echo 'This is a minimal pipeline for AOL DevOps Assessment'
+				echo 'Checking out SCM'
+				checkout scm
+
+				sh '''
+					echo "PATH = ${PATH}"
+					echo "M2_HOME = ${M2_HOME}"
+					echo "JAVA_HOME = ${JAVA_HOME}"
+					java -version
+				'''
+			}
+		}
+		stage('Build') {
+			agent {
+				label 'Slave-1'
+		    }
+			steps {
+				echo 'Building..'
+				echo 'Set JAVA_HOME to /usr/lib/jvm/java-8-openjdk-amd64 '
+				sh 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 && mvn clean install && mvn package'
+			}
+		}
+		stage ('Java Tests') {
+			agent {
+				label 'Slave-1'
+		    }
+			steps {
+				echo 'Place holder to run Unit tests.'
+				sh ''
+				sh 'sleep 3'
+			}
+		}
+		stage ('SonarQube Analysis') {
+			agent {
+				label 'Slave-1'
+		    }
+			steps {
+				script{
+				scannerHome = tool 'SonarQube(GBS-DST)';
+			  }
+			withSonarQubeEnv('GBS_SonarQube') {
+				sh "${scannerHome}/bin/sonar-runner " +
+					"-Dsonar.host.url=https://gbsjenkins.ap-south.containers.mybluemix.net/sonar " +
+					"-Dsonar.login=52e4f4fb0091a405cd7a67b928fcd518e362e3eb" +
+					" -Dsonar.projectVersion=${BUILD_NUMBER}"+
+					" -Dsonar.projectName=aol-devops-dev" +
+					" -Dsonar.java.binaries=target/classes" +
+					" -Dsonar.projectKey=hcp-auth-devops-dev" +
+					" -Dsonar.sources=. " +
+					" -Dsonar.exclusions=target/**/*.class"
+			}
+				
+			}
+		}
+		stage ('ucd deploy') {
+		agent {
+				label 'Slave-1'
+		    }
+			steps {
+                    echo 'started deploying in UCD'
+                    step([  $class: 'UCDeployPublisher',
+                    siteName: 'IBM GBS UCD',
+                    component: [
+                    $class: 'com.urbancode.jenkins.plugins.ucdeploy.VersionHelper$VersionBlock',
+                    componentName: 'aol-devops',
+                    delivery: [
+                    $class: 'com.urbancode.jenkins.plugins.ucdeploy.DeliveryHelper$Push',
+                    pushVersion: '${BUILD_NUMBER}',
+                    baseDir: 'workspace//HybridCloudPortal//aol-devops-dev',
+                             ]
+                              ],
+                    deploy: [
+                 $class: 'com.urbancode.jenkins.plugins.ucdeploy.DeployHelper$DeployBlock',
+                 deployApp: 'HybridCloudPortal',
+                 deployEnv: 'dev',
+                 deployProc: 'ApplicationProcess-aol-devops',
+                 deployVersions: 'aol-devops:${BUILD_NUMBER}',
+                 deployOnlyChanged: false
+                         ]
+                           ])
+                  }
+				  }
+	}
+	post {
+        always {
+			slackSend channel: '#aol_build',
+				  teamDomain: 'ibm-caes',
+				  token: '5AdQXVcqMWs7J2R9FAqOY7f8',
+                  message: "Completed *${env.JOB_NAME} #${env.BUILD_NUMBER}*"
+        }
+        failure {
+            slackSend channel: '#aol_build',
+				  teamDomain: 'ibm-caes',
+				  token: '5AdQXVcqMWs7J2R9FAqOY7f8',
+                  color: 'bad',
+                  message: ":bomb: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.BUILD_URL}"
+        }
+        success {
+            slackSend channel: '#aol_build',
+				  teamDomain: 'ibm-caes',
+				  token: '5AdQXVcqMWs7J2R9FAqOY7f8',
+                  color: 'good',
+                  message: ":dancer: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.BUILD_URL}"
+        }
+    }
+}
